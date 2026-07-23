@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
-const json=(status,body)=>({statusCode:status,headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 const sb=()=>({url:process.env.SUPABASE_URL,headers:{apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,authorization:`Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`}});
 export default async req=>{
- if(req.httpMethod!=='POST')return json(405,{error:'Method not allowed'});
- try{const {buyerName,buyerEmail,wallet,productIds,proofBase64,proofName}=JSON.parse(req.body||'{}');
+ if(req.method!=='POST')return json(405,{error:'Method not allowed'});
+ try{const {buyerName,buyerEmail,wallet,productIds,proofBase64,proofName}=await req.json();
   if(!buyerName||!['DANA','OVO','GoPay'].includes(wallet)||!Array.isArray(productIds)||!productIds.length)return json(400,{error:'Data pesanan tidak lengkap.'});
   const {url,headers}=sb(); if(!url||!process.env.SUPABASE_SERVICE_ROLE_KEY)return json(500,{error:'Server belum dikonfigurasi.'});
   const q=encodeURIComponent(`in.(${productIds.map(x=>`"${x}"`).join(',')})`);
