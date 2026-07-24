@@ -31,6 +31,21 @@ async function adminOrder(action,orderId){
  const data=await r.json();if(!r.ok)throw new Error(data.error||'Aksi admin gagal.');return data;
 }
 let activeOrderToken='';let orderStatusTimer;
+function vapidKeyToBytes(value){const padded=value+'='.repeat((4-value.length%4)%4);const base64=padded.replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(char=>char.charCodeAt(0)))}
+async function enablePush(recipientType){
+ if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))throw new Error('Browser ini belum mendukung notifikasi push.');
+ if(recipientType==='buyer'&&!activeOrderToken)throw new Error('Buka halaman pesanan terlebih dahulu.');
+ const permission=await Notification.requestPermission();if(permission!=='granted')throw new Error('Izin notifikasi belum diberikan.');
+ const configResponse=await fetch('/.netlify/functions/push-public-config');const config=await configResponse.json();if(!configResponse.ok)throw new Error(config.error||'Notifikasi belum dikonfigurasi.');
+ const registration=await navigator.serviceWorker.ready;
+ let subscription=await registration.pushManager.getSubscription();
+ if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:vapidKeyToBytes(config.publicKey)});
+ const headers={'content-type':'application/json'};if(recipientType==='admin')headers.authorization=`Bearer ${adminToken}`;
+ const response=await fetch('/.netlify/functions/push-subscribe',{method:'POST',headers,body:JSON.stringify({recipientType,subscription,orderToken:recipientType==='buyer'?activeOrderToken:undefined})});
+ const data=await response.json();if(!response.ok)throw new Error(data.error||'Gagal mengaktifkan notifikasi.');
+ const button=$(recipientType==='admin'?'#enable-admin-push':'#enable-buyer-push');if(button){button.textContent='Notifikasi aktif';button.disabled=true;}
+ toast('Notifikasi berhasil diaktifkan pada perangkat ini.');
+}
 async function checkOrderStatus(){
  if(!activeOrderToken)return;const title=$('#order-status-title'),copy=$('#order-status-copy'),downloads=$('#order-downloads');title.textContent='Memeriksa status pesanan...';copy.textContent='';downloads.innerHTML='';
  try{const r=await fetch(`/.netlify/functions/download?token=${encodeURIComponent(activeOrderToken)}`);if(!r.ok){title.textContent='Pesanan menunggu verifikasi';copy.textContent='Bukti transfer sudah diterima. Bukti transfer sudah diterima. Halaman ini memeriksa status pembayaran otomatis.';return}const data=await r.json();title.textContent='Pembayaran dikonfirmasi';copy.textContent='Produk Anda siap diunduh. Link unduhan berlaku terbatas.';downloads.innerHTML=data.downloads.map((url,i)=>`<a class="button" href="${url}" target="_blank" rel="noopener">Unduh produk ${i+1} <span>â†“</span></a>`).join('');}catch(e){title.textContent='Status belum dapat diperiksa';copy.textContent=e.message;}
@@ -62,6 +77,8 @@ function openProductForm(p){const f=$('#product-form');f.reset();$('#product-mod
 $('.cart-open').onclick=()=>drawer(true);$('.overlay').onclick=()=>drawer(false);$('.drawer .close').onclick=()=>drawer(false);$('.checkout').onclick=openCheckout;$('.admin-open').onclick=()=>$('#admin-gate').showModal();$$('.modal-close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
 $('#checkout-modal .wallets').addEventListener('click',e=>{const b=e.target.closest('button');if(b){selectedWallet=b.dataset.wallet;$$('.wallets button').forEach(x=>x.style.outline='');b.style.outline='2px solid #172b24'}});
 $('#check-order-status').onclick=()=>checkOrderStatus();
+$('#enable-buyer-push').onclick=()=>enablePush('buyer').catch(error=>toast(error.message));
+$('#enable-admin-push').onclick=()=>enablePush('admin').catch(error=>toast(error.message));
 $('#proof-form').onsubmit=async e=>{e.preventDefault();const form=new FormData(e.target);try{if(REMOTE){const proof=form.get('proof');const proofBase64=proof?.size?await new Promise((ok,bad)=>{const rd=new FileReader();rd.onload=()=>ok(rd.result);rd.onerror=bad;rd.readAsDataURL(proof)}):null;const r=await fetch('/.netlify/functions/create-order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({buyerName:form.get('buyer'),wallet:selectedWallet,productIds:cart,proofBase64,proofName:proof?.name})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Pesanan gagal dibuat.');showOrderStatus(data.accessToken,data.orderCode)}else{orders.push({buyer:form.get('buyer'),wallet:selectedWallet,items:[...cart],date:new Date().toLocaleString('id-ID'),proof:form.get('proof').name});save();toast('Bukti diterima. Pesanan menunggu verifikasi pembayaran.')}cart=[];save();renderCart();$('#checkout-modal').close();e.target.reset()}catch(err){toast(err.message)}};
 $('#pin-form').onsubmit=e=>{e.preventDefault();const error=$('#admin-gate .form-error');if(e.target.querySelector('input').value==='banda212'){$('#admin-gate').close();$('#login-modal').showModal();error.textContent=''}else error.textContent='PIN tidak sesuai.'};
 $('#login-form').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),error=$('#login-modal .form-error');try{if(REMOTE){const r=await fetch(`${REMOTE.supabaseUrl}/auth/v1/token?grant_type=password`,{method:'POST',headers:{...headers(),'content-type':'application/json'},body:JSON.stringify({email:fd.get('email'),password:fd.get('password')})});const data=await r.json();if(!r.ok)throw new Error('Email atau password tidak sesuai.');if(data.user?.app_metadata?.role!=='admin')throw new Error('Akun ini bukan admin.');adminToken=data.access_token;sessionStorage.setItem('bp_admin_token',adminToken);$('#login-modal').close();showAdmin();e.target.reset();return}throw new Error('Mode demo memerlukan konfigurasi lama.')}catch(err){error.textContent=err.message}};$('#logout').onclick=()=>{sessionStorage.removeItem('bp_admin_token');adminToken='';hideAdmin()};$('#new-product').onclick=()=>openProductForm();

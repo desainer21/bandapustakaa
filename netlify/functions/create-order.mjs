@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {sendPush} from './_push.mjs';
+
 const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 const sb=()=>({url:process.env.SUPABASE_URL,headers:{apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,authorization:`Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`}});
 export default async req=>{
@@ -14,6 +16,8 @@ export default async req=>{
   const order={id:orderId,buyer_name:buyerName,buyer_email:buyerEmail||null,wallet,total,proof_path:proofPath,access_token:token};
   const created=await fetch(`${url}/rest/v1/orders`,{method:'POST',headers:{...headers,'content-type':'application/json',prefer:'return=representation'},body:JSON.stringify(order)});if(!created.ok)throw new Error('Gagal membuat pesanan.');
   const items=products.map(p=>({order_id:orderId,product_id:p.id,product_name:p.name,unit_price:p.price}));const itemRes=await fetch(`${url}/rest/v1/order_items`,{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify(items)});if(!itemRes.ok)throw new Error('Gagal menyimpan item pesanan.');
-  const [saved]=await created.json();return json(201,{orderCode:saved.order_code,accessToken:token,status:'pending'});
+  const [saved]=await created.json();
+  void sendPush({recipientType:'admin',title:'Pesanan baru - Banda Pustaka',body:`${buyerName} mengirim pesanan ${saved.order_code}.`,url:'/#admin'}).catch(error=>console.error('Admin push error:',error.message));
+  return json(201,{orderCode:saved.order_code,accessToken:token,status:'pending'});
  }catch(e){console.error(e);return json(500,{error:e.message||'Terjadi kesalahan server.'})}
 };
